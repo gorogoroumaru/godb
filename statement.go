@@ -78,19 +78,24 @@ func execute_insert(statement *Statement, table *Table) int {
 	}
 
 	row_to_insert := &statement.row_to_insert
+	cursor := table_end(table)
 
-	serialize_row(row_to_insert, row_slot(table, table.num_rows))
+	serialize_row(row_to_insert, cursor_value(cursor))
 	table.num_rows++
 
 	return EXECUTE_SUCCESS
 }
 
 func execute_select(statement *Statement, table *Table) int {
+	cursor := table_start(table)
 	var row Row
-	for i := uint32(0); i < table.num_rows; i++ {
-		deserialize_row(row_slot(table, i), &row)
+
+	for !cursor.end_of_table {
+		deserialize_row(cursor_value(cursor), &row)
 		print_row(&row)
+		cursor_advance(cursor)
 	}
+
 	return EXECUTE_SUCCESS
 }
 
