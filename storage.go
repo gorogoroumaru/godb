@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"syscall"
 	"unsafe"
 )
 
@@ -37,35 +39,15 @@ func print_row(row *Row) {
 	fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
 }
 
+type Pager struct {
+	fileDescriptor int
+	fileLength     uint32
+	pages          [TABLE_MAX_PAGES]*[]byte
+}
+
 type Table struct {
 	num_rows uint32
-	pages    [TABLE_MAX_PAGES]*[ROWS_PER_PAGE]Row
-}
-
-func serialize_row(source *Row, destination unsafe.Pointer) {
-	dest := uintptr(destination)
-	copy((*[ID_SIZE]byte)(unsafe.Pointer(dest + ID_OFFSET))[:], (*[ID_SIZE]byte)(unsafe.Pointer(&source.id))[:])
-	copy((*[USERNAME_SIZE]byte)(unsafe.Pointer(dest + USERNAME_OFFSET))[:], (*[USERNAME_SIZE]byte)(unsafe.Pointer(&source.username))[:])
-	copy((*[EMAIL_SIZE]byte)(unsafe.Pointer(dest + EMAIL_OFFSET))[:], (*[EMAIL_SIZE]byte)(unsafe.Pointer(&source.email))[:])
-}
-
-func deserialize_row(source unsafe.Pointer, destination *Row) {
-	src := uintptr(source)
-	copy((*[ID_SIZE]byte)(unsafe.Pointer(&destination.id))[:], (*[ID_SIZE]byte)(unsafe.Pointer(src + ID_OFFSET))[:])
-	copy((*[USERNAME_SIZE]byte)(unsafe.Pointer(&destination.username))[:], (*[USERNAME_SIZE]byte)(unsafe.Pointer(src + USERNAME_OFFSET))[:])
-	copy((*[EMAIL_SIZE]byte)(unsafe.Pointer(&destination.email))[:], (*[EMAIL_SIZE]byte)(unsafe.Pointer(src + EMAIL_OFFSET))[:])
-}
-
-func row_slot(table *Table, row_num uint32) unsafe.Pointer {
-	page_num := row_num / uint32(ROWS_PER_PAGE)
-	page := table.pages[page_num]
-	if page == nil {
-		page := new([ROWS_PER_PAGE]Row)
-		table.pages[page_num] = page
-	}
-	row_offset := row_num % uint32(ROWS_PER_PAGE)
-	byte_offset := row_offset * uint32(ROW_SIZE)
-	return unsafe.Pointer(uintptr(unsafe.Pointer(table.pages[page_num])) + uintptr(byte_offset))
+	pager *Pager
 }
 
 func new_table() *Table {
@@ -74,10 +56,127 @@ func new_table() *Table {
 	return table
 }
 
-func free_table(table *Table) {
-	for _, page := range table.pages {
-		if page != nil {
-			page = nil
-		}
+func get_page(pager *Pager, page_num uint32) *[]byte {
+	if page_num > TABLE_MAX_PAGES {
+		log.Fatalf("Tried to fetch page number out of bounds. %d > %d\n", page_num, TABLE_MAX_PAGES)
 	}
+
+	if pager.pages[page_num] == nil {
+		page := make([]byte, PAGE_SIZE)
+		num_pages := pager.fileLength / PAGE_SIZE
+
+		if pager.fileLength%PAGE_SIZE != 0 {
+			num_pages += 1
+		}
+
+		if page_num <= num_pages {
+			_, err := syscall.Seek(pager.fileDescriptor, int64(page_num*PAGE_SIZE), 0)
+			if err != nil {
+				log.Fatalf("Error seeking file: %v\n", err)
+			}
+
+			_, err = syscall.Read(pager.fileDescriptor, page)
+			if err != nil {
+				log.Fatalf("Error reading file: %v\n", err)
+			}
+		}
+
+		pager.pages[page_num] = &page
+	}
+
+	return pager.pages[page_num]
+}
+
+func serialize_row(source *Row, destination []byte) {
+	copy(destination[ID_OFFSET:ID_OFFSET+ID_SIZE], (*[ID_SIZE]byte)(unsafe.Pointer(&source.id))[:])
+	copy(destination[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE], (*[USERNAME_SIZE]byte)(unsafe.Pointer(&source.username))[:])
+	copy(destination[EMAIL_OFFSET:EMAIL_OFFSET+EMAIL_SIZE], (*[EMAIL_SIZE]byte)(unsafe.Pointer(&source.email))[:])
+}
+
+func deserialize_row(source []byte, destination *Row) {
+	copy((*[ID_SIZE]byte)(unsafe.Pointer(&destination.id))[:], source[ID_OFFSET:ID_OFFSET+ID_SIZE])
+	copy((*[USERNAME_SIZE]byte)(unsafe.Pointer(&destination.username))[:], source[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE])
+	copy((*[EMAIL_SIZE]byte)(unsafe.Pointer(&destination.email))[:], source[EMAIL_OFFSET:EMAIL_OFFSET+EMAIL_SIZE])
+}
+
+
+func row_slot(table *Table, row_num uint32) []byte {
+	page_num := row_num / uint32(ROWS_PER_PAGE)
+	page := get_page(table.pager, page_num)
+	row_offset := row_num % uint32(ROWS_PER_PAGE)
+	byte_offset := uintptr(row_offset) * ROW_SIZE
+	return (*page)[byte_offset : byte_offset+ROW_SIZE]
+}
+
+func pager_open(filename string) *Pager {
+	fd, err := syscall.Open(filename, syscall.O_RDWR|syscall.O_CREAT, 0666)
+	if err != nil {
+		log.Fatalf("Unable to open file: %v\n", err)
+	}
+
+	file_length, _ := syscall.Seek(fd, 0, 2)
+
+	pager := &Pager{
+		fileDescriptor: fd,
+		fileLength:     uint32(file_length),
+		pages:          [TABLE_MAX_PAGES]*[]byte{},
+	}
+
+	return pager
+}
+
+func db_open(filename string) *Table {
+	pager := pager_open(filename)
+	num_rows := pager.fileLength / uint32(ROW_SIZE)
+
+	table := &Table{
+		pager:   pager,
+		num_rows: num_rows,
+	}
+
+	return table
+}
+
+func pager_flush(pager *Pager, page_num uint32, size uint32) {
+	if pager.pages[page_num] == nil {
+		log.Fatalf("Tried to flush null page\n")
+	}
+
+	offset, err := syscall.Seek(pager.fileDescriptor, int64(page_num*PAGE_SIZE), 0)
+	if err != nil || offset == -1 {
+		log.Fatalf("Error seeking: %v\n", err)
+	}
+
+	bytes_written, err := syscall.Write(pager.fileDescriptor, (*pager.pages[page_num])[:size])
+	if err != nil || bytes_written == -1 {
+		log.Fatalf("Error writing: %v\n", err)
+	}
+}
+
+func db_close(table *Table) {
+	pager := table.pager
+	num_full_pages := table.num_rows / uint32(ROWS_PER_PAGE)
+
+	for i := uint32(0); i < num_full_pages; i++ {
+		if pager.pages[i] == nil {
+			continue
+		}
+
+        pager_flush(pager, i, PAGE_SIZE)
+        pager.pages[i] = nil
+    }
+
+    num_additional_rows := table.num_rows % uint32(ROWS_PER_PAGE)
+    if num_additional_rows > 0 {
+        page_num := num_full_pages
+        if pager.pages[page_num] != nil {
+            pager_flush(pager, page_num, num_additional_rows * uint32(ROW_SIZE))
+            pager.pages[page_num] = nil
+        }
+    }
+
+    result := syscall.Close(pager.fileDescriptor)
+    if result != nil {
+        log.Fatalf("Error closing db file.\n")
+    }
 }

@@ -15,7 +15,7 @@ const (
 func do_meta_command(input_buffer *InputBuffer, table *Table) int {
 	if input_buffer.buffer[:5] == ".exit" {
 		close_input_buffer(input_buffer)
-		free_table(table)
+		db_close(table)
 		os.Exit(0)
 	} else {
 		fmt.Printf("Unrecognized command '%s'.\n", input_buffer.buffer)
