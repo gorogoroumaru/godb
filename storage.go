@@ -42,17 +42,17 @@ func print_row(row *Row) {
 type Pager struct {
 	fileDescriptor int
 	fileLength     uint32
+	num_pages      uint32
 	pages          [TABLE_MAX_PAGES]*[]byte
 }
 
 type Table struct {
-	num_rows uint32
 	pager *Pager
+	root_page_num uint32
 }
 
 func new_table() *Table {
 	table := &Table{}
-	table.num_rows = 0
 	return table
 }
 
@@ -82,6 +82,10 @@ func get_page(pager *Pager, page_num uint32) *[]byte {
 		}
 
 		pager.pages[page_num] = &page
+
+		if page_num >= pager.num_pages {
+			pager.num_pages = page_num + 1
+		}
 	}
 
 	return pager.pages[page_num]
@@ -119,7 +123,13 @@ func pager_open(filename string) *Pager {
 	pager := &Pager{
 		fileDescriptor: fd,
 		fileLength:     uint32(file_length),
+		num_pages:      uint32(file_length / int64(PAGE_SIZE)),
 		pages:          [TABLE_MAX_PAGES]*[]byte{},
+	}
+
+	if (file_length % PAGE_SIZE) != 0 {
+		fmt.Println("Db file is not a whole number of pages. Corrupt file.")
+		syscall.Exit(1)
 	}
 
 	return pager
@@ -127,11 +137,15 @@ func pager_open(filename string) *Pager {
 
 func db_open(filename string) *Table {
 	pager := pager_open(filename)
-	num_rows := pager.fileLength / uint32(ROW_SIZE)
 
 	table := &Table{
 		pager:   pager,
-		num_rows: num_rows,
+		root_page_num: 0,
+	}
+
+	if pager.num_pages == 0 {
+		root_node := get_page(pager, 0)
+		initialize_leaf_node(*root_node)
 	}
 
 	return table
@@ -147,7 +161,7 @@ func pager_flush(pager *Pager, page_num uint32, size uint32) {
 		log.Fatalf("Error seeking: %v\n", err)
 	}
 
-	bytes_written, err := syscall.Write(pager.fileDescriptor, (*pager.pages[page_num])[:size])
+	bytes_written, err := syscall.Write(pager.fileDescriptor, (*pager.pages[page_num])[:PAGE_SIZE])
 	if err != nil || bytes_written == -1 {
 		log.Fatalf("Error writing: %v\n", err)
 	}
@@ -155,24 +169,14 @@ func pager_flush(pager *Pager, page_num uint32, size uint32) {
 
 func db_close(table *Table) {
 	pager := table.pager
-	num_full_pages := table.num_rows / uint32(ROWS_PER_PAGE)
 
-	for i := uint32(0); i < num_full_pages; i++ {
+	for i := uint32(0); i < pager.num_pages; i++ {
 		if pager.pages[i] == nil {
 			continue
 		}
 
-        pager_flush(pager, i, PAGE_SIZE)
+        pager_flush(pager, i, i)
         pager.pages[i] = nil
-    }
-
-    num_additional_rows := table.num_rows % uint32(ROWS_PER_PAGE)
-    if num_additional_rows > 0 {
-        page_num := num_full_pages
-        if pager.pages[page_num] != nil {
-            pager_flush(pager, page_num, num_additional_rows * uint32(ROW_SIZE))
-            pager.pages[page_num] = nil
-        }
     }
 
     result := syscall.Close(pager.fileDescriptor)

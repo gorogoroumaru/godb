@@ -25,8 +25,10 @@ func main() {
 			switch do_meta_command(input_buffer, table) {
 			case META_COMMAND_SUCCESS:
 				fmt.Println("success")
+				continue
 			case META_COMMAND_UNRECOGNIZED_COMMAND:
 				fmt.Printf("unrecognized command")
+				continue
 			}
 		}
 
@@ -34,18 +36,24 @@ func main() {
 		switch prepare_statement(input_buffer, statement) {
 		case PREPARE_STRING_TOO_LONG:
 			fmt.Println("String is too long")
+			continue
 		case PREPARE_NEGATIVE_ID:
 			fmt.Println("ID must be positive")
+			continue
 		case PREPARE_SYNTAX_ERROR:
 			fmt.Println("syntax error. could not parse statement")
+			continue
 		case PREPARE_UNRECOGNIZED_STATEMENT:
 			s := fmt.Sprintf("unrecognized at start of %#v", input_buffer.buffer)
 			fmt.Println(s)
+			continue
 		}
 
 		switch execute_statement(statement, table) {
 		case EXECUTE_SUCCESS:
 			fmt.Println("Executed")
+		case EXECUTE_DUPLICATE_KEY:
+			fmt.Println("Error: Duplicate Key")
 		case EXECUTE_TABLE_FULL:
 			fmt.Println("Error: Table Full")
 		}

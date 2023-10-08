@@ -21,6 +21,7 @@ const (
 const (
 	EXECUTE_SUCCESS = iota
 	EXECUTE_TABLE_FULL
+	EXECUTE_DUPLICATE_KEY
 )
 
 type Statement struct {
@@ -73,15 +74,23 @@ func prepare_statement(input_buffer *InputBuffer, statement *Statement) int {
 }
 
 func execute_insert(statement *Statement, table *Table) int {
-	if table.num_rows >= uint32(TABLE_MAX_ROWS) {
+	node := get_page(table.pager, table.root_page_num)
+	num_cells := leaf_node_num_cells(*node)
+	if num_cells >= LEAF_NODE_MAX_CELLS {
 		return EXECUTE_TABLE_FULL
 	}
 
 	row_to_insert := &statement.row_to_insert
-	cursor := table_end(table)
+	key_to_insert := row_to_insert.id
+	cursor := table_find(table, key_to_insert)
 
-	serialize_row(row_to_insert, cursor_value(cursor))
-	table.num_rows++
+	if (cursor.cell_num < num_cells) {
+		key_at_index := leaf_node_key(*node, cursor.cell_num)
+		if (key_at_index == key_to_insert) {
+			return EXECUTE_DUPLICATE_KEY;
+		}
+	}
+	leaf_node_insert(cursor, row_to_insert.id, row_to_insert)
 
 	return EXECUTE_SUCCESS
 }
