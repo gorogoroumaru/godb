@@ -91,6 +91,10 @@ func get_page(pager *Pager, page_num uint32) *[]byte {
 	return pager.pages[page_num]
 }
 
+func get_unused_page_num(pager *Pager) uint32 {
+	return pager.num_pages
+}
+
 func serialize_row(source *Row, destination []byte) {
 	copy(destination[ID_OFFSET:ID_OFFSET+ID_SIZE], (*[ID_SIZE]byte)(unsafe.Pointer(&source.id))[:])
 	copy(destination[USERNAME_OFFSET:USERNAME_OFFSET+USERNAME_SIZE], (*[USERNAME_SIZE]byte)(unsafe.Pointer(&source.username))[:])
@@ -146,6 +150,7 @@ func db_open(filename string) *Table {
 	if pager.num_pages == 0 {
 		root_node := get_page(pager, 0)
 		initialize_leaf_node(*root_node)
+		set_node_root(*root_node, true)
 	}
 
 	return table

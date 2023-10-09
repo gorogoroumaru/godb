@@ -76,9 +76,6 @@ func prepare_statement(input_buffer *InputBuffer, statement *Statement) int {
 func execute_insert(statement *Statement, table *Table) int {
 	node := get_page(table.pager, table.root_page_num)
 	num_cells := leaf_node_num_cells(*node)
-	if num_cells >= LEAF_NODE_MAX_CELLS {
-		return EXECUTE_TABLE_FULL
-	}
 
 	row_to_insert := &statement.row_to_insert
 	key_to_insert := row_to_insert.id

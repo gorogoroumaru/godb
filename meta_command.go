@@ -18,7 +18,7 @@ func do_meta_command(input_buffer *InputBuffer, table *Table) int {
 		os.Exit(0)
 	} else if input_buffer.buffer[:6] == ".btree" {
 		fmt.Println("Tree: ")
-		print_leaf_node(*get_page(table.pager, 0))
+		print_tree(table.pager, 0, 0)
 		return META_COMMAND_SUCCESS
 	} else if input_buffer.buffer[:10] == ".constants" {
 		fmt.Println("constants: ")
