@@ -30,6 +30,11 @@ func print_prompt() { fmt.Print("db > ") }
 func read_input(input_buffer *InputBuffer) {
 	reader := bufio.NewReader(os.Stdin)
 	input, _ := reader.ReadString('\n')
-	input_buffer.buffer = input[:len(input)-1]
-	input_buffer.input_length = len(input) - 1
+	if input == "\n" || len(input) == 0 {
+        input_buffer.buffer = ""
+        input_buffer.input_length = 0
+    } else {
+        input_buffer.buffer = input[:len(input)-1]
+        input_buffer.input_length = len(input) - 1
+    }
 }

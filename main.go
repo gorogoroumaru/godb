@@ -20,6 +20,9 @@ func main() {
 		print_prompt()
 		read_input(input_buffer)
 
+		if len(input_buffer.buffer) == 0 {
+			continue
+		}
 
 		if string(input_buffer.buffer[0]) == "." {
 			switch do_meta_command(input_buffer, table) {
