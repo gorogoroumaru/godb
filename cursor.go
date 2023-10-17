@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 )
 
 type Cursor struct {
@@ -26,17 +25,15 @@ func table_start(table *Table) *Cursor {
 }
 
 func table_find(table *Table, key uint32) *Cursor {
-	rootPageNum := table.root_page_num
-	rootNode := get_page(table.pager, rootPageNum)
+	root_page_num := table.root_page_num
+	rootNode := get_page(table.pager, root_page_num)
 
 	fmt.Println(get_node_type(*rootNode))
 	if get_node_type(*rootNode) == NODE_LEAF {
-		return leaf_node_find(table, rootPageNum, key)
+		return leaf_node_find(table, root_page_num, key)
 	} else {
-		fmt.Println("Need to implement searching an internal node")
-		os.Exit(1)
+		return internal_node_find(table, root_page_num, key)
 	}
-	return nil
 }
 
 func cursor_value(cursor *Cursor) []byte {

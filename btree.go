@@ -77,9 +77,40 @@ func internal_node_child(node []byte, childNum uint32) []byte {
 	}
 }
 
+
 func internal_node_key(node []byte, keyNum uint32) []byte {
 	return internal_node_cell(node, keyNum)[INTERNAL_NODE_CHILD_SIZE:]
 }
+
+func internal_node_find(table *Table, page_num uint32, key uint32) *Cursor {
+    node := get_page(table.pager, page_num)
+    num_keys := internal_node_num_keys(*node)
+
+    min_index := uint32(0)
+    max_index := num_keys
+
+    for min_index != max_index {
+        index := (min_index + max_index) / 2
+        key_to_right := binary.LittleEndian.Uint32(internal_node_key(*node, index))
+        if key_to_right >= key {
+            max_index = index
+        } else {
+            min_index = index + 1
+        }
+    }
+
+    child_num := binary.LittleEndian.Uint32(internal_node_child(*node, min_index))
+    child := get_page(table.pager, child_num)
+    switch get_node_type(*child) {
+    case NODE_LEAF:
+        return leaf_node_find(table, child_num, key)
+    case NODE_INTERNAL:
+        return internal_node_find(table, child_num, key)
+    }
+
+	return nil
+}
+
 
 func get_node_max_key(node []byte) uint32 {
 	switch get_node_type(node) {
@@ -137,7 +168,7 @@ func leaf_node_num_cells(node []byte) uint32 {
 }
 
 func leaf_node_cell(node []byte, cell_num uint32) []byte {
-	return node[LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE:]
+	return node[LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE:][:LEAF_NODE_CELL_SIZE]
 }
 
 func leaf_node_key(node []byte, cellNum uint32) uint32 {
@@ -145,7 +176,8 @@ func leaf_node_key(node []byte, cellNum uint32) uint32 {
 }
 
 func leaf_node_value(node []byte, cell_num uint32) []byte {
-	return leaf_node_cell(node, cell_num)[LEAF_NODE_KEY_SIZE:]
+	cell := leaf_node_cell(node, cell_num)
+	return cell[LEAF_NODE_KEY_SIZE:]
 }
 
 func leaf_node_find(table *Table, page_num uint32, key uint32) *Cursor {
@@ -197,9 +229,11 @@ func leaf_node_split_and_insert(cursor *Cursor, key uint32, value *Row) {
 		if i == int(cursor.cell_num) {
 			serialize_row(value, destination)
 		} else if i > int(cursor.cell_num) {
-			copy(destination, leaf_node_cell(*oldNode, uint32(i-1)))
+			cell := leaf_node_cell(*oldNode, uint32(i-1))
+			copy(destination, cell)
 		} else {
-			copy(destination, leaf_node_cell(*oldNode, uint32(i)))
+			cell := leaf_node_cell(*oldNode, uint32(i))
+			copy(destination, cell)
 		}
 	}
 
